@@ -1,0 +1,118 @@
+CREATE DATABASE QLPT
+
+CREATE TABLE PHONGTRO (
+	MaPT char(5) Primary Key,
+	TenPT nvarchar(50),
+	DienTich float,
+	LoaiPT nvarchar(15),
+	GiaPT money,
+	TinhTrangPT nvarchar(20)
+)
+CREATE TABLE CUDAN (
+	MaCD char(5) Primary Key,
+	HoTen nvarchar(50),
+	CCCD nvarchar(12),
+	DiaChi nvarchar(100),
+	SoDT varchar(15),
+	NgayThue smalldatetime,
+	TrangThaiCD nvarchar(15)
+)
+CREATE TABLE HOPDONG (
+	MaHD char(5) Primary Key,
+	MaCD char(5),
+	MaPT char(5),
+	NgayKy smalldatetime,
+	NgayHetHan smalldatetime,
+	TrangThaiHD nvarchar(20),
+	CONSTRAINT FK_HopDong_CuDan FOREIGN KEY (MaCD) REFERENCES CUDAN(MaCD),
+	CONSTRAINT FK_HopDong_PhongTro FOREIGN KEY (MaPT) REFERENCES PHONGTRO(MaPT)
+)
+CREATE TABLE DICHVU (
+	MaDV char(5) Primary Key,
+	TenDV nvarchar(50),
+	DonGia money
+)
+CREATE TABLE PHIEUTINHTIEN (
+	MaPTT char(5) Primary Key,
+	MaHD char(5)
+	SoTienDichVu money,
+	SoTienThuePT money,
+	TongTienTT money,
+	NgayTinhTien smalldatetime,
+	TinhTrangTT nvarchar(20),
+	PhuongThucTT nvarchar(20),
+	CONSTRAINT FK_PhieuTT_HopDong FOREIGN KEY (MaHD) REFERENCES HOPDONG(MaHD)
+)
+CREATE TABLE CHITIETTTDV (
+	MaPTT CHAR(5),
+	MaDV CHAR(5),
+	ChiSoDV FLOAT,
+	ThanhTien MONEY
+	CONSTRAINT PK_ChiTietTTDV PRIMARY KEY (MaPTT, MaDV),
+	CONSTRAINT FK_ChiTiet_PhieuTT FOREIGN KEY (MaPTT) REFERENCES PHIEUTINHTIEN(MaPTT),
+	CONSTRAINT FK_ChiTiet_DichVu FOREIGN KEY (MaDV) REFERENCES DICHVU(MaDV)
+)
+---2.1---
+ALTER TABLE DICHVU 
+ADD CONSTRAINT CHK_DONGIA CHECK (DonGia >= 2000 AND DonGia <= 500000)
+---2.2---
+ALTER TABLE PHONGTRO 
+ADD CONSTRAINT CHK_LOAIPT CHECK (LoaiPT IN ('Kiot', 'Co gac xep', 'Khong gac xep'))
+---2.3---
+CREATE TRIGGER INSERT_CTDV
+ON CHITIETTTDV
+AFTER INSERT
+AS
+	IF (EXISTS(SELECT *
+				FROM PHIEUTINHTIEN PTT
+				WHERE SOTIENDICHVU <> (SELECT SUM(THANHTIEN)
+										FROM inserted I
+										WHERE I.MAPTT = PTT.MAPTT)))
+	BEGIN
+		ROLLBACK TRANSACTION
+		PRINT ' Số tiền của các dịch vụ đã sử dụng trong phiếu tính tiền được tính bằng tổng thành tiền của các chi tiết sử dụng dịch vụ của phiếu tính tiền đó'
+	END
+---3.1---
+SELECT PTT.MaPTT, MaHD, ChiSoDV, ThanhTien
+FROM PHIEUTINHTIEN PTT 
+JOIN CHITIETTTDV CTDV ON PTT.MaPTT = CTDV.MaPTT
+JOIN DICHVU DV ON CTDV.MaDV = DV.MaDV
+WHERE YEAR (NgayTinhTien) = 2024 AND TenDV = 'Dien'
+---3.2---
+SELECT PT.MaPT, TenPT
+FROM PHONGTRO PT 
+JOIN HOPDONG HD ON PT.MaPT = HD.MaHD
+JOIN PHIEUTINHTIEN PTT ON HD.MaHD = PTT.MaHD
+WHERE YEAR (NgayKy) = 2024
+EXCEPT 
+SELECT PT.MaPT, TenPT
+FROM PHONGTRO PT 
+JOIN HOPDONG HD ON PT.MaPT = HD.MaHD
+JOIN PHIEUTINHTIEN PTT ON HD.MaHD = PTT.MaHD
+WHERE YEAR (NgayKy) = 2024 AND PhuongThucTT = 'Chuyen khoan' AND TongTienTT > 4000000
+---3.3---
+SELECT CD.MaCD, HoTen
+FROM CUDAN CD
+WHERE NOT EXISTS (SELECT * 
+				FROM PHONGTRO PT
+				WHERE LoaiPT = 'Kiot' AND DienTich = 40
+				AND NOT EXISTS (SELECT *
+								FROM HOPDONG HD
+								WHERE HD.MaCD  = CD.MaCD AND HD.MaPT = PT.MaPT ))
+---3.4---
+SELECT CD.MaCD, HoTen, COUNT(MaHD)
+FROM CUDAN CD 
+LEFT JOIN HOPDONG HD ON CD.MaCD = HD.MaHD
+WHERE YEAR(NgayKy) >= 2022 AND YEAR(NgayKy) <= 2024 
+GROUP BY CD.MaCD, HoTen
+---3.5---
+SELECT TOP 1 WITH TIES PTT.MaHD
+FROM DICHVU DV
+JOIN CHITIETTTDV CTDV ON DV.MaDV = CTDV.MaDV
+JOIN PHIEUTINHTIEN PTT ON CTDV.MaPTT = PTT.MaPTT
+WHERE TenDV = 'Dien' AND MaHD IN (SELECT MaHD
+				FROM PHIEUTINHTIEN PTT
+				GROUP BY MaHD
+				HAVING COUNT(MaPTT) >= 2)
+GROUP BY MaHD
+ORDER BY SUM(CTDV.ChiSoDV) ASC 
